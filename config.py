@@ -4,7 +4,7 @@ Grok API 配置文件
 import os
 
 # API 配置
-API_KEY = "你的API输入到此处"
+API_KEY = "xai-R6uxRo22ikTCYBS9UOcVL3OLhQ4FYSnzsFYMPb7yhwVG61MoHrEGXgnA18L2T2UBr9kXmZleSc4Ly4wm"
 BASE_URL = "https://api.x.ai/v1"
 
 # 模型配置
@@ -29,3 +29,6 @@ VECTOR_SEARCH_ENABLED = True  # 是否启用向量检索
 
 # 应用配置
 APP_NAME = "API "
+
+# 在文件末尾添加高德地图API配置
+AMAP_KEY = "d0ffe5458588590f9fb67f1aa2931faa"  # 替换为实际的密钥

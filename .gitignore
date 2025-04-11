@@ -1,0 +1,16 @@
+echo "# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.env
+venv/
+env/
+
+# 项目特定
+config.py
+data/
+*.npy
+*.pkl
+*.faiss
+" > .gitignore
