@@ -7,7 +7,7 @@ import json
 T = TypeVar('T')
 
 class GrokClient:
-    def __init__(self, api_key, base_url, default_model="grok-2-latest"):
+    def __init__(self, api_key, base_url, default_model="grok-2"):
         """
         初始化 Grok API 客户端
         
@@ -127,3 +127,66 @@ class GrokClient:
                 # 返回空模型实例
                 return response_model()
             return {"error": str(e)}
+    
+    # 在GrokClient类中添加支持函数调用的方法
+
+    def ask_with_functions(self, prompt, functions, model=None, system_message=None, history_messages=None):
+        """
+        使用函数调用能力向API发送请求，采用单次调用模式
+        """
+        if model is None:
+            model = self.default_model
+            
+        messages = []
+        
+        # 如果提供了系统消息，添加到消息列表
+        if system_message:
+            messages.append({"role": "system", "content": system_message})
+        
+        # 如果提供了历史消息，添加到消息列表
+        if history_messages:
+            messages.extend(history_messages)
+        
+        # 添加当前用户消息
+        messages.append({"role": "user", "content": prompt})
+        
+        try:
+            # 发送带函数定义的请求
+            completion = self.client.chat.completions.create(
+                model=model,
+                messages=messages,
+                tools=functions,
+                tool_choice="auto",
+                timeout=60
+            )
+            
+            response_message = completion.choices[0].message
+            
+            # 检查是否有工具调用
+            if hasattr(response_message, 'tool_calls') and response_message.tool_calls:
+                # 提取工具调用信息
+                tool_call = response_message.tool_calls[0]
+                function_call = {
+                    "name": tool_call.function.name,
+                    "arguments": json.loads(tool_call.function.arguments)
+                }
+                
+                return {
+                    "content": response_message.content or "",
+                    "function_call": function_call,
+                    "has_function_call": True
+                }
+            else:
+                # 没有工具调用，只返回内容
+                return {
+                    "content": response_message.content,
+                    "has_function_call": False
+                }
+                
+        except Exception as e:
+            print(f"⚠️ 函数调用请求出错: {str(e)}")
+            return {
+                "content": f"请求出错: {str(e)}",
+                "error": str(e),
+                "has_function_call": False
+            }

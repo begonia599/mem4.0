@@ -3,6 +3,7 @@ import datetime
 import os
 from model.llm_client import GrokClient
 from core.session import Session
+from functions.weather import get_weather, WeatherRequest
 
 def main():
     # 确保数据目录存在
@@ -17,6 +18,14 @@ def main():
     
     # 创建会话
     session = Session(grok, config)
+    
+    # 注册天气查询功能
+    weather_schema = WeatherRequest.model_json_schema()
+    session.register_function(
+        get_weather,
+        description="查询指定城市的天气信息。仅当用户明确询问天气时才调用此函数。",
+        parameters=weather_schema
+    )
     
     # 启动会话（开始记忆线程）
     session.start()

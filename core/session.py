@@ -5,10 +5,12 @@ import threading
 import queue
 import time
 import os
+import json
 from .memory_manager import MemoryManager
 from .response_manager import ResponseManager
 from vector.embedder import MemoryEmbedder
 from vector.retriever import MemoryRetriever
+from functions.function_registry import FunctionRegistry
 
 class Session:
     def __init__(self, llm_client, config):
@@ -53,6 +55,9 @@ class Session:
         # 线程
         self.memory_thread = None
         
+        # 初始化函数注册中心
+        self.function_registry = FunctionRegistry()
+        
     def start(self):
         """启动会话，包括记忆处理线程"""
         if self.running:
@@ -71,13 +76,7 @@ class Session:
     
     def process_message(self, user_message):
         """
-        处理用户消息，生成回复
-        
-        Args:
-            user_message (str): 用户输入的消息
-            
-        Returns:
-            str: 助手的回复
+        处理用户消息，生成回复 - 采用简化的函数调用流程
         """
         # 获取上下文历史（如果启用）
         history_messages = None
@@ -113,18 +112,93 @@ class Session:
         if memory_context:
             enhanced_message = memory_context + "\n\n" + user_message
         
-        # 生成回复
-        response = self.llm_client.ask(
-            prompt=enhanced_message,
-            model=self.model,
-            system_message=self.system_message,
-            history_messages=history_messages
-        )
+        # 获取函数定义
+        function_definitions = self.function_registry.get_function_definitions()
         
-        # 保存对话记录（保存原始用户消息，而非增强后的消息）
+        if function_definitions:
+            print("🔧 正在分析是否需要调用工具函数...")
+            
+            # 生成回复（使用函数调用能力）
+            response_data = self.llm_client.ask_with_functions(
+                prompt=enhanced_message,
+                functions=function_definitions,
+                model=self.model,
+                system_message=self.system_message,
+                history_messages=history_messages
+            )
+            
+            # 检查是否有函数调用
+            if response_data.get("has_function_call", False):
+                function_call = response_data["function_call"]
+                function_name = function_call["name"]
+                arguments = function_call["arguments"]
+                
+                print(f"🔧 需要调用函数: {function_name}")
+                print(f"📋 参数: {json.dumps(arguments, ensure_ascii=False)}")
+                
+                try:
+                    # 执行函数
+                    print(f"⚙️ 正在执行函数...")
+                    function_result = self.function_registry.execute_function(function_name, arguments)
+                    print(f"✅ 函数执行完成")
+                    
+                    # 特殊处理天气查询等直接响应的功能
+                    if function_name == "get_weather":
+                        weather = function_result
+                        response = (
+                            f"我查到了{weather.get('city', '该城市')}的天气！"
+                            f"现在是{weather.get('weather', '未知天气')}，温度{weather.get('temperature', '未知')}℃，"
+                            f"湿度{weather.get('humidity', '未知')}%，{weather.get('winddirection', '未知')}风"
+                            f"{weather.get('windpower', '未知')}级。"
+                        )
+                    else:
+                        # 将函数结果内嵌到提示中，直接生成回复
+                        result_prompt = (
+                            f"{user_message}\n\n"
+                            f"函数 {function_name} 已执行，返回结果:\n"
+                            f"{json.dumps(function_result, ensure_ascii=False, indent=2)}\n\n"
+                            f"请基于以上结果回答用户的问题。"
+                        )
+                        
+                        response = self.llm_client.ask(
+                            prompt=result_prompt,
+                            model=self.model,
+                            system_message=self.system_message
+                        )
+                    
+                    # 保存对话记录
+                    self.response_manager.add_exchange(user_message, response)
+                    
+                    # 自动记忆处理
+                    if self.auto_memory:
+                        self.memory_queue.put({
+                            "type": "analyze",
+                            "content": user_message,
+                            "timestamp": time.time()
+                        })
+                    
+                    return response
+                    
+                except Exception as e:
+                    error_msg = f"函数执行失败: {str(e)}"
+                    print(f"❌ {error_msg}")
+                    return error_msg
+            else:
+                # 无函数调用，正常处理
+                response = response_data["content"]
+        else:
+            # 没有可用函数，使用普通模式
+            response = self.llm_client.ask(
+                prompt=enhanced_message,
+                model=self.model,
+                system_message=self.system_message,
+                history_messages=history_messages
+            )
+        
+        # 保存对话记录
         self.response_manager.add_exchange(user_message, response)
         
-        # 如果启用自动记忆，将消息发送到记忆处理队列
+        # 自动记忆处理
         if self.auto_memory:
             self.memory_queue.put({
                 "type": "analyze",
@@ -203,3 +277,7 @@ class Session:
     def toggle_vector_search(self, enable):
         """开关向量检索功能"""
         self.config.VECTOR_SEARCH_ENABLED = enable
+
+    def register_function(self, func, name=None, description=None, parameters=None):
+        """注册一个可调用的函数"""
+        self.function_registry.register(func, name, description, parameters)
